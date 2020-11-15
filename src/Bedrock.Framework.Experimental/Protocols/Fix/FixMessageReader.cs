@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Buffers;
 using System.Buffers.Text;
+using System.Collections.Generic;
 using System.Text;
 using Bedrock.Framework.Infrastructure;
 using Bedrock.Framework.Protocols;
@@ -18,16 +19,16 @@ namespace Bedrock.Framework.Experimental.Protocols.Fix
             var reader = new SequenceReader<byte>(input);
 
             if (!TryReadField(ref reader, out var beginStringField) ||
-                beginStringField.Tag != (int)Tags.BeginString ||
+                beginStringField.Tag != (int)FixTag.BeginString ||
                 !TryReadField(ref reader, out var bodyLengthField) ||
-                bodyLengthField.Tag != (int)Tags.BodyLength)
+                bodyLengthField.Tag != (int)FixTag.BodyLength)
             {
                 examined = reader.Position;
                 message = default;
                 return false;
             }
 
-            if (!Utf8Parser.TryParse(bodyLengthField.Value.Span, out int bodyLength, out var lengthConsumed) ||
+            if (!Utf8Parser.TryParse(bodyLengthField.Value.ToSpan(), out int bodyLength, out var lengthConsumed) ||
                 lengthConsumed < bodyLengthField.Value.Length)
             {
                 examined = reader.Position;
@@ -38,14 +39,14 @@ namespace Bedrock.Framework.Experimental.Protocols.Fix
             var body = input.Slice(reader.Consumed, bodyLength);
             reader.Advance(bodyLength);
 
-            var bodyString = Encoding.ASCII.GetString(body.ToArray());
+            //var bodyString = Encoding.ASCII.GetString(body.ToArray());
 
             // Calculate the checksum before consuming the field, which is not included in calculation
-            var calculatedChecksum = ComputeAdditionChecksum(input.Slice(0, reader.Consumed));
+            var calculatedChecksum = ComputeChecksum(input.Slice(0, reader.Consumed));
             
             if (!TryReadField(ref reader, out var checksumField) ||
-                checksumField.Tag != (int)Tags.CheckSum ||
-                !Utf8Parser.TryParse(checksumField.Value.Span, out int checksum, out var checksumConsumed) ||
+                checksumField.Tag != (int)FixTag.CheckSum ||
+                !Utf8Parser.TryParse(checksumField.Value.ToSpan(), out int checksum, out var checksumConsumed) ||
                 checksumConsumed < checksumField.Value.Length ||
                 checksum != calculatedChecksum)
             {
@@ -56,11 +57,30 @@ namespace Bedrock.Framework.Experimental.Protocols.Fix
 
             examined = reader.Position;
             consumed = reader.Position;
-            message = new FixMessage();
+
+            var messageBuilder = new FixMessageBuilder();
+                //.AddField(beginStringField.Tag, beginStringField.Value);
+
+            message = messageBuilder.Build();
             return true;
         }
         
-        private static byte ComputeAdditionChecksum(ReadOnlySequence<byte> data)
+        private static bool TryReadField(ref SequenceReader<byte> reader, out (int Tag, ReadOnlySequence<byte> Value) field)
+        {
+            if (!reader.TryReadTo(out ReadOnlySpan<byte> tag, EQUAL) ||
+                !Utf8Parser.TryParse(tag, out int tagNumber, out var consumed) ||
+                consumed < tag.Length || 
+                !reader.TryReadTo(out ReadOnlySequence<byte> value, SOH))
+            {
+                field = default;
+                return false;
+            }
+
+            field = (tagNumber, value);
+            return true;
+        }
+        
+        private static byte ComputeChecksum(ReadOnlySequence<byte> data)
         {
             byte sum = 0;
             unchecked // Let overflow occur without exceptions
@@ -75,55 +95,24 @@ namespace Bedrock.Framework.Experimental.Protocols.Fix
             }
             return sum;
         }
-        
-        private static bool TryReadField(ref SequenceReader<byte> reader, out FixField fixField)
-        {
-            if (!reader.TryReadTo(out ReadOnlySpan<byte> tag, EQUAL) ||
-                !Utf8Parser.TryParse(tag, out int tagNumber, out var consumed) ||
-                consumed < tag.Length || 
-                !reader.TryReadTo(out ReadOnlySequence<byte> value, SOH))
-            {
-                fixField = default;
-                return false;
-            }
-
-            fixField = new FixField(tagNumber, value.ToMemory());
-            return true;
-        }
     }
 
-    public readonly struct FixField
+    public class FixMessageBuilder
     {
-        public FixField(int tag, ReadOnlyMemory<byte> value)
+        private readonly List<FixField> _fields;
+
+        public FixMessageBuilder()
         {
-            Tag = tag;
-            Value = value;
+            _fields = new List<FixField>(50);
         }
 
-        public int Tag { get; }
-
-        public ReadOnlyMemory<byte> Value { get; }
-
-        public void Deconstruct(out int tag, out ReadOnlyMemory<byte> value)
+        public FixMessageBuilder AddField(int tag, int value)
         {
-            tag = Tag;
-            value = Value;
+            _fields.Add(new FixField(tag, new FixValue(value)));
+            return this;
         }
-    }
-
-    public class FixMessage 
-    {
         
+        public FixMessage Build() => new FixMessage(_fields.ToArray());
     }
     
-
-    /// <summary>
-    /// Tags from 4.4 fix specification
-    /// </summary>
-    public enum Tags
-    {
-        BeginString = 8,
-        BodyLength = 9,
-        CheckSum = 10,
-    }
 }
