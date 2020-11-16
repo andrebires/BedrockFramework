@@ -10,5 +10,9 @@ namespace Bedrock.Framework.Experimental.Protocols.Fix
         }
 
         public FixField[] Fields { get; }
+
+        public override string ToString() => ToString('|');
+        
+        public string ToString(char separator) => string.Join(separator, Fields);
     }
 }

@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Buffers;
 using System.Buffers.Text;
-using System.Collections.Generic;
 using System.Text;
 using Bedrock.Framework.Infrastructure;
 using Bedrock.Framework.Protocols;
@@ -16,6 +15,8 @@ namespace Bedrock.Framework.Experimental.Protocols.Fix
         public bool TryParseMessage(in ReadOnlySequence<byte> input, ref SequencePosition consumed, ref SequencePosition examined,
             out FixMessage message)
         {
+            var messageBuilder = new FixMessageBuilder();
+            
             var reader = new SequenceReader<byte>(input);
 
             if (!TryReadField(ref reader, out var beginStringField) ||
@@ -28,6 +29,8 @@ namespace Bedrock.Framework.Experimental.Protocols.Fix
                 return false;
             }
 
+            messageBuilder.AddField(beginStringField.Tag, Encoding.ASCII.GetString(beginStringField.Value.ToSpan()));
+
             if (!Utf8Parser.TryParse(bodyLengthField.Value.ToSpan(), out int bodyLength, out var lengthConsumed) ||
                 lengthConsumed < bodyLengthField.Value.Length)
             {
@@ -35,11 +38,15 @@ namespace Bedrock.Framework.Experimental.Protocols.Fix
                 message = default;
                 return false;
             }
+
+            messageBuilder.AddField(bodyLengthField.Tag, bodyLength);
             
             var body = input.Slice(reader.Consumed, bodyLength);
             reader.Advance(bodyLength);
 
-            //var bodyString = Encoding.ASCII.GetString(body.ToArray());
+            #if DEBUG
+            var bodyString = Encoding.ASCII.GetString(body.ToArray());
+            #endif
 
             // Calculate the checksum before consuming the field, which is not included in calculation
             var calculatedChecksum = ComputeChecksum(input.Slice(0, reader.Consumed));
@@ -54,12 +61,18 @@ namespace Bedrock.Framework.Experimental.Protocols.Fix
                 message = default;
                 return false;
             }
+            
+            var bodyReader = new SequenceReader<byte>(body);
+            while (TryReadField(ref bodyReader, out var field))
+            {
+                // TODO: Instead of allocating for all body fields (ToArray), check the tag type and use the correct constructor.
+                messageBuilder.AddField(field.Tag, field.Value.ToArray());
+            }
 
+            messageBuilder.AddField(checksumField.Tag, checksum);
+            
             examined = reader.Position;
             consumed = reader.Position;
-
-            var messageBuilder = new FixMessageBuilder();
-                //.AddField(beginStringField.Tag, beginStringField.Value);
 
             message = messageBuilder.Build();
             return true;
@@ -96,23 +109,4 @@ namespace Bedrock.Framework.Experimental.Protocols.Fix
             return sum;
         }
     }
-
-    public class FixMessageBuilder
-    {
-        private readonly List<FixField> _fields;
-
-        public FixMessageBuilder()
-        {
-            _fields = new List<FixField>(50);
-        }
-
-        public FixMessageBuilder AddField(int tag, int value)
-        {
-            _fields.Add(new FixField(tag, new FixValue(value)));
-            return this;
-        }
-        
-        public FixMessage Build() => new FixMessage(_fields.ToArray());
-    }
-    
 }

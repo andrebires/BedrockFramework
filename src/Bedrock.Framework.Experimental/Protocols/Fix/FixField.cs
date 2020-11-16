@@ -25,5 +25,7 @@ namespace Bedrock.Framework.Experimental.Protocols.Fix
             tag = Tag;
             value = Value;
         }
+
+        public override string ToString() => $"{Tag}={Value}";
     }
 }
