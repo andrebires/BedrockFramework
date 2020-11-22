@@ -4,12 +4,6 @@ namespace Bedrock.Framework.Experimental.Protocols.Fix
 {
     public readonly struct FixField
     {
-        public FixField(FixTag tag, FixValue value)
-            : this((int)tag, value)
-        {
-            
-        }
-        
         public FixField(int tag, FixValue value)
         {
             Tag = tag;

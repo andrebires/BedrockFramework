@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Buffers.Binary;
 using System.Buffers.Text;
 using System.Globalization;
 using System.Text;
+using Microsoft.AspNetCore.Mvc.ModelBinding.Binders;
 
 namespace Bedrock.Framework.Experimental.Protocols.Fix
 {
@@ -122,6 +124,18 @@ namespace Bedrock.Framework.Experimental.Protocols.Fix
             }
             
             throw new InvalidCastException($"Unable to cast from {value.Type} to long: '{value}'");
+        }
+
+        public static implicit operator ReadOnlyMemory<byte>(FixValue value)
+        {
+            // TODO: Convert number directly to span without allocating a string?
+            switch (value.Type)
+            {
+                case StorageType.Raw:
+                    return value._rawValue;
+                default:
+                    return Encoding.ASCII.GetBytes((string)value); 
+            }
         }
 
         private StorageType Type

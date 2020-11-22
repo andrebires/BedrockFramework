@@ -3,10 +3,16 @@
     /// <summary>
     /// Tags from 4.4 fix specification
     /// </summary>
-    public enum FixTag
+    public static class Fix
     {
-        BeginString = 8,
-        BodyLength = 9,
-        CheckSum = 10,
+        public static class V4_4
+        {
+            public const int BeginString = 8;
+            public const int BodyLength = 9;
+            public const int CheckSum = 10;
+            public const int MsgType = 35;
+            
+        }
+            
     }
 }
